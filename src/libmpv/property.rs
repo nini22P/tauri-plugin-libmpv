@@ -16,6 +16,18 @@ pub enum MpvFormat {
     Node,
 }
 
+impl From<MpvFormat> for libmpv_sys::mpv_format {
+    fn from(format: MpvFormat) -> Self {
+        match format {
+            MpvFormat::String => libmpv_sys::mpv_format_MPV_FORMAT_STRING,
+            MpvFormat::Flag => libmpv_sys::mpv_format_MPV_FORMAT_FLAG,
+            MpvFormat::Int64 => libmpv_sys::mpv_format_MPV_FORMAT_INT64,
+            MpvFormat::Double => libmpv_sys::mpv_format_MPV_FORMAT_DOUBLE,
+            MpvFormat::Node => libmpv_sys::mpv_format_MPV_FORMAT_NODE,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum PropertyValue {
@@ -291,7 +303,7 @@ impl Mpv {
                     libmpv_sys::mpv_format_MPV_FORMAT_DOUBLE,
                     &mut f as *mut _ as *mut _,
                 ),
-                PropertyValue::Node(_) => todo!(),
+                PropertyValue::Node(_) => unimplemented!(),
             }
         };
 

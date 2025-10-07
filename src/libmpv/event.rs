@@ -155,11 +155,7 @@ impl Event {
                     unsafe { libmpv_sys::mpv_free_node_contents(node_ptr as *mut _) };
                 }
 
-                let node = if node_ptr.is_null() {
-                    MpvNode::None
-                } else {
-                    MpvNode::from_property(property)?
-                };
+                let node = MpvNode::from_property(property)?;
 
                 Ok(Some(Event::GetPropertyReply {
                     name,
@@ -177,8 +173,16 @@ impl Event {
             libmpv_sys::mpv_event_id_MPV_EVENT_COMMAND_REPLY => {
                 let cmd = unsafe { *(event.data as *const libmpv_sys::mpv_event_command) };
 
+                let node_ptr = &cmd.result as *const libmpv_sys::mpv_node;
+
+                defer! {
+                    unsafe { libmpv_sys::mpv_free_node_contents(node_ptr as *mut _) };
+                }
+
+                let node = MpvNode::from_node(node_ptr)?;
+
                 Ok(Some(Event::CommandReply {
-                    result: MpvNode::from_node(&cmd.result)?,
+                    result: node,
                     error: event.error,
                     id: event.reply_userdata,
                 }))

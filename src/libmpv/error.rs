@@ -24,9 +24,9 @@ pub enum Error {
     InvalidCString(#[from] std::ffi::NulError),
     #[error("Invalid parameter: {0}")]
     InvalidParameter(String),
-    #[error("Failed to convert node: {0}")]
+    #[error("Failed to convert node data: {0}")]
     NodeConversion(String),
-    #[error("Failed to convert property: {0}")]
+    #[error("Failed to convert property data: {0}")]
     PropertyConversion(String),
     #[error("This operation or format is not yet supported: {0}")]
     Unsupported(String),

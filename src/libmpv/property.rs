@@ -6,6 +6,22 @@ use crate::libmpv::{utils::cstr_to_string, utils::error_string, Error, Mpv, Resu
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
+fn format_to_string(format_code: libmpv_sys::mpv_format) -> String {
+    match format_code {
+        libmpv_sys::mpv_format_MPV_FORMAT_NONE => "MPV_FORMAT_NONE".to_string(),
+        libmpv_sys::mpv_format_MPV_FORMAT_STRING => "MPV_FORMAT_STRING".to_string(),
+        libmpv_sys::mpv_format_MPV_FORMAT_OSD_STRING => "MPV_FORMAT_OSD_STRING".to_string(),
+        libmpv_sys::mpv_format_MPV_FORMAT_FLAG => "MPV_FORMAT_FLAG".to_string(),
+        libmpv_sys::mpv_format_MPV_FORMAT_INT64 => "MPV_FORMAT_INT64".to_string(),
+        libmpv_sys::mpv_format_MPV_FORMAT_DOUBLE => "MPV_FORMAT_DOUBLE".to_string(),
+        libmpv_sys::mpv_format_MPV_FORMAT_NODE => "MPV_FORMAT_NODE".to_string(),
+        libmpv_sys::mpv_format_MPV_FORMAT_NODE_ARRAY => "MPV_FORMAT_NODE_ARRAY".to_string(),
+        libmpv_sys::mpv_format_MPV_FORMAT_NODE_MAP => "MPV_FORMAT_NODE_MAP".to_string(),
+        libmpv_sys::mpv_format_MPV_FORMAT_BYTE_ARRAY => "MPV_FORMAT_BYTE_ARRAY".to_string(),
+        unknown_code => format!("Unknown format code ({})", unknown_code),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MpvFormat {
@@ -85,9 +101,9 @@ impl MpvNode {
                 let bytes = std::slice::from_raw_parts(ba.data as *const u8, ba.size).to_vec();
                 Ok(MpvNode::ByteArray(bytes))
             }
-            _ => Err(Error::NodeConversion(format!(
-                "Unsupported mpv_node format code: {}",
-                (*node).format
+            format => Err(Error::NodeConversion(format!(
+                "Unsupported mpv_node format: {}",
+                format_to_string(format)
             ))),
         }
     }
@@ -112,162 +128,132 @@ impl MpvNode {
             libmpv_sys::mpv_format_MPV_FORMAT_NODE => {
                 Self::from_node(property.data as *const libmpv_sys::mpv_node)
             }
-            _ => Err(Error::PropertyConversion(format!(
-                "Unsupported mpv_event_property format code: {}",
-                property.format
+            format => Err(Error::PropertyConversion(format!(
+                "Unsupported mpv_event_property format: {}",
+                format_to_string(format)
             ))),
         }
     }
 }
 
+macro_rules! get_property_impl {
+    ($fn_name:ident, $ret_type:ty, $mpv_format:expr, $data_type:ty, $converter:expr) => {
+        pub fn $fn_name(&self, name: &str) -> Result<$ret_type> {
+            let c_name = CString::new(name)?;
+            let mut data: $data_type = Default::default();
+
+            let err = unsafe {
+                libmpv_sys::mpv_get_property(
+                    self.handle.inner(),
+                    c_name.as_ptr(),
+                    $mpv_format,
+                    &mut data as *mut _ as *mut _,
+                )
+            };
+
+            if err < 0 {
+                return Err(Error::GetProperty {
+                    name: name.to_string(),
+                    message: error_string(err),
+                });
+            }
+
+            Ok($converter(data))
+        }
+    };
+}
+
+macro_rules! get_property_ptr_impl {
+    (
+        $fn_name:ident,
+        $ret_type:ty,
+        $mpv_format:expr,
+        $ptr_type:ty,
+        $free_fn:path,
+        $null_ret:expr,
+        $converter:expr
+    ) => {
+        pub fn $fn_name(&self, name: &str) -> Result<$ret_type> {
+            let c_name = CString::new(name)?;
+            let mut data: $ptr_type = std::ptr::null_mut();
+
+            let err = unsafe {
+                libmpv_sys::mpv_get_property(
+                    self.handle.inner(),
+                    c_name.as_ptr(),
+                    $mpv_format,
+                    &mut data as *mut _ as *mut _,
+                )
+            };
+
+            defer! {
+                if !data.is_null() {
+                    unsafe { $free_fn(data as *mut _) };
+                }
+            }
+
+            if err < 0 {
+                return Err(Error::GetProperty {
+                    name: name.to_string(),
+                    message: error_string(err),
+                });
+            }
+
+            if data.is_null() {
+                return Ok($null_ret);
+            }
+
+            unsafe { $converter(data) }
+        }
+    };
+}
+
 impl Mpv {
-    pub fn get_property_string(&self, name: &str) -> Result<String> {
-        let c_name = CString::new(name)?;
+    get_property_ptr_impl!(
+        get_property_string,
+        String,
+        libmpv_sys::mpv_format_MPV_FORMAT_STRING,
+        *mut std::os::raw::c_char,
+        libmpv_sys::mpv_free,
+        String::new(),
+        |data| Ok(std::ffi::CStr::from_ptr(data)
+            .to_string_lossy()
+            .into_owned())
+    );
 
-        let mut data: *mut std::os::raw::c_char = std::ptr::null_mut();
+    get_property_impl!(
+        get_property_flag,
+        bool,
+        libmpv_sys::mpv_format_MPV_FORMAT_FLAG,
+        std::os::raw::c_int,
+        |d| d != 0
+    );
 
-        let err = unsafe {
-            libmpv_sys::mpv_get_property(
-                self.handle.inner(),
-                c_name.as_ptr(),
-                libmpv_sys::mpv_format_MPV_FORMAT_STRING,
-                &mut data as *mut _ as *mut _,
-            )
-        };
+    get_property_impl!(
+        get_property_int64,
+        i64,
+        libmpv_sys::mpv_format_MPV_FORMAT_INT64,
+        i64,
+        |d| d
+    );
 
-        defer! {
-            if !data.is_null() {
-                unsafe { libmpv_sys::mpv_free(data as *mut _) };
-            }
-        }
+    get_property_impl!(
+        get_property_double,
+        f64,
+        libmpv_sys::mpv_format_MPV_FORMAT_DOUBLE,
+        f64,
+        |d| d
+    );
 
-        if err < 0 {
-            return Err(Error::GetProperty {
-                name: name.to_string(),
-                message: error_string(err),
-            });
-        }
-
-        if data.is_null() {
-            return Ok("".to_string());
-        }
-
-        let result = unsafe {
-            std::ffi::CStr::from_ptr(data)
-                .to_string_lossy()
-                .into_owned()
-        };
-
-        Ok(result)
-    }
-
-    pub fn get_property_flag(&self, name: &str) -> Result<bool> {
-        let c_name = CString::new(name)?;
-
-        let mut data: std::os::raw::c_int = 0;
-
-        let err = unsafe {
-            libmpv_sys::mpv_get_property(
-                self.handle.inner(),
-                c_name.as_ptr(),
-                libmpv_sys::mpv_format_MPV_FORMAT_FLAG,
-                &mut data as *mut _ as *mut _,
-            )
-        };
-
-        if err < 0 {
-            return Err(Error::GetProperty {
-                name: name.to_string(),
-                message: error_string(err),
-            });
-        }
-
-        Ok(data != 0)
-    }
-
-    pub fn get_property_int64(&self, name: &str) -> Result<i64> {
-        let c_name = CString::new(name)?;
-
-        let mut data: i64 = 0;
-
-        let err = unsafe {
-            libmpv_sys::mpv_get_property(
-                self.handle.inner(),
-                c_name.as_ptr(),
-                libmpv_sys::mpv_format_MPV_FORMAT_INT64,
-                &mut data as *mut _ as *mut _,
-            )
-        };
-
-        if err < 0 {
-            return Err(Error::GetProperty {
-                name: name.to_string(),
-                message: error_string(err),
-            });
-        }
-
-        Ok(data)
-    }
-
-    pub fn get_property_double(&self, name: &str) -> Result<f64> {
-        let c_name = CString::new(name)?;
-
-        let mut data: f64 = 0.0;
-
-        let err = unsafe {
-            libmpv_sys::mpv_get_property(
-                self.handle.inner(),
-                c_name.as_ptr(),
-                libmpv_sys::mpv_format_MPV_FORMAT_DOUBLE,
-                &mut data as *mut _ as *mut _,
-            )
-        };
-
-        if err < 0 {
-            return Err(Error::GetProperty {
-                name: name.to_string(),
-                message: error_string(err),
-            });
-        }
-
-        Ok(data)
-    }
-
-    pub fn get_property_node(&self, name: &str) -> Result<MpvNode> {
-        let c_name = CString::new(name)?;
-
-        let mut data: *mut libmpv_sys::mpv_node = std::ptr::null_mut();
-
-        let err = unsafe {
-            libmpv_sys::mpv_get_property(
-                self.handle.inner(),
-                c_name.as_ptr(),
-                libmpv_sys::mpv_format_MPV_FORMAT_NODE,
-                &mut data as *mut _ as *mut _,
-            )
-        };
-
-        defer! {
-            if !data.is_null() {
-                unsafe { libmpv_sys::mpv_free_node_contents(data) };
-            }
-        }
-
-        if err < 0 {
-            return Err(Error::GetProperty {
-                name: name.to_string(),
-                message: error_string(err),
-            });
-        }
-
-        if data.is_null() {
-            return Ok(MpvNode::None);
-        }
-
-        let node = unsafe { MpvNode::from_node(data)? };
-
-        Ok(node)
-    }
+    get_property_ptr_impl!(
+        get_property_node,
+        MpvNode,
+        libmpv_sys::mpv_format_MPV_FORMAT_NODE,
+        *mut libmpv_sys::mpv_node,
+        libmpv_sys::mpv_free_node_contents,
+        MpvNode::None,
+        |data| MpvNode::from_node(data)
+    );
 
     pub fn set_property(&self, name: &str, value: PropertyValue) -> Result<()> {
         let c_name = CString::new(name)?;

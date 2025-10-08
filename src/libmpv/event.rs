@@ -35,13 +35,15 @@ impl EventListener {
 pub fn start_event_listener(mut event_handler: EventHandler, event_listener: EventListener) {
     std::thread::spawn(move || {
         while let Some(Ok(event)) = event_listener.wait_event(60.0) {
-            if let Event::Shutdown = event {
-                log::info!("Shutdown event received. Terminating mpv core from event thread.");
-                let _ = event_handler(event);
-                break;
-            }
+            let is_shutdown = matches!(event, Event::Shutdown);
+
             if let Err(e) = event_handler(event) {
                 log::error!("Error in mpv event handler: {}. Exiting loop.", e);
+                break;
+            }
+
+            if is_shutdown {
+                log::info!("Shutdown event received. Terminating event loop.");
                 break;
             }
         }

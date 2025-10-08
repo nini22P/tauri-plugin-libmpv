@@ -64,7 +64,7 @@ impl MpvBuilder {
             if err < 0 {
                 return Err(Error::SetOption {
                     name,
-                    code: error_string(err),
+                    message: error_string(err),
                 });
             }
         }
@@ -94,7 +94,7 @@ impl MpvBuilder {
             if err < 0 {
                 return Err(Error::PropertyObserve {
                     name: name.to_string(),
-                    code: error_string(err),
+                    message: error_string(err),
                 });
             }
         }

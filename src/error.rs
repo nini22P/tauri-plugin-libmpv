@@ -10,6 +10,8 @@ pub enum Error {
     #[error(transparent)]
     PluginInvoke(#[from] tauri::plugin::mobile::PluginInvokeError),
     #[error(transparent)]
+    Tauri(#[from] tauri::Error),
+    #[error(transparent)]
     Mpv(#[from] crate::libmpv::Error),
     #[error("Unsupported platform {0}")]
     UnsupportedPlatform(String),
@@ -19,12 +21,26 @@ pub enum Error {
     WindowHandle(#[from] raw_window_handle::HandleError),
     #[error("mpv instance not found: {0}")]
     InstanceNotFound(String),
-    #[error("Command Error: {0}")]
-    Command(String),
-    #[error("Set Property Error: {0}")]
-    SetProperty(String),
-    #[error("Get Property Error: {0}")]
-    GetProperty(String),
+    #[error("Command failed for window '{window_label}'")]
+    Command {
+        window_label: String,
+        #[source]
+        source: crate::libmpv::Error,
+    },
+    #[error("Set Property failed for window '{window_label}'")]
+    SetProperty {
+        window_label: String,
+        #[source]
+        source: crate::libmpv::Error,
+    },
+    #[error("Get Property failed for window '{window_label}'")]
+    GetProperty {
+        window_label: String,
+        #[source]
+        source: crate::libmpv::Error,
+    },
+    #[error("Invalid value for property '{name}': {message}")]
+    InvalidPropertyValue { name: String, message: String },
     #[error("Failed to destroy mpv instance: {0}")]
     Destroy(String),
 }

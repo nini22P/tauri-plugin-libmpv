@@ -20,7 +20,7 @@ impl Mpv {
         if err < 0 {
             return Err(Error::Command {
                 name: name.to_string(),
-                code: error_string(err),
+                message: error_string(err),
             });
         }
 

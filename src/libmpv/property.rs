@@ -144,7 +144,7 @@ impl Mpv {
         if err < 0 {
             return Err(Error::GetProperty {
                 name: name.to_string(),
-                code: error_string(err),
+                message: error_string(err),
             });
         }
 
@@ -178,7 +178,7 @@ impl Mpv {
         if err < 0 {
             return Err(Error::GetProperty {
                 name: name.to_string(),
-                code: error_string(err),
+                message: error_string(err),
             });
         }
 
@@ -202,7 +202,7 @@ impl Mpv {
         if err < 0 {
             return Err(Error::GetProperty {
                 name: name.to_string(),
-                code: error_string(err),
+                message: error_string(err),
             });
         }
 
@@ -226,7 +226,7 @@ impl Mpv {
         if err < 0 {
             return Err(Error::GetProperty {
                 name: name.to_string(),
-                code: error_string(err),
+                message: error_string(err),
             });
         }
 
@@ -256,7 +256,7 @@ impl Mpv {
         if err < 0 {
             return Err(Error::GetProperty {
                 name: name.to_string(),
-                code: error_string(err),
+                message: error_string(err),
             });
         }
 
@@ -303,14 +303,18 @@ impl Mpv {
                     libmpv_sys::mpv_format_MPV_FORMAT_DOUBLE,
                     &mut f as *mut _ as *mut _,
                 ),
-                PropertyValue::Node(_) => unimplemented!(),
+                PropertyValue::Node(_) => {
+                    return Err(Error::Unsupported(
+                        "Setting a property with a Node value is not supported".to_string(),
+                    ));
+                }
             }
         };
 
         if err < 0 {
             return Err(Error::SetProperty {
                 name: name.to_string(),
-                code: error_string(err),
+                message: error_string(err),
             });
         }
 

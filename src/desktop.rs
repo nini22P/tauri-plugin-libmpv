@@ -153,23 +153,24 @@ impl<R: Runtime> Mpv<R> {
                     } else if let Some(f) = n.as_f64() {
                         libmpv::PropertyValue::Double(f)
                     } else {
-                        return Err(crate::Error::SetProperty(format!(
-                            "Unsupported number format: {}",
-                            n
-                        )));
+                        return Err(crate::Error::InvalidPropertyValue {
+                            name: name.to_string(),
+                            message: format!("Unsupported number format: {}", n),
+                        });
                     }
                 }
                 serde_json::Value::String(s) => libmpv::PropertyValue::String(s.clone()),
                 serde_json::Value::Null => {
-                    return Err(crate::Error::SetProperty(
-                        "Cannot set property to null".to_string(),
-                    ))
+                    return Err(crate::Error::InvalidPropertyValue {
+                        name: name.to_string(),
+                        message: "Cannot set property to null".to_string(),
+                    });
                 }
                 _ => {
-                    return Err(crate::Error::SetProperty(format!(
-                        "Unsupported value type for property '{}'",
-                        name
-                    )))
+                    return Err(crate::Error::InvalidPropertyValue {
+                        name: name.to_string(),
+                        message: format!("Unsupported value type: {:?}", value),
+                    });
                 }
             };
 
@@ -233,9 +234,7 @@ impl<R: Runtime> Mpv<R> {
             for (property, value_option) in margins {
                 if let Some(value) = value_option {
                     let prop_value = libmpv::PropertyValue::Double(value);
-                    if let Err(e) = instance.mpv.set_property(property, prop_value) {
-                        error!("Failed to set video margin ratio for '{}': {}", property, e);
-                    }
+                    instance.mpv.set_property(property, prop_value)?;
                 }
             }
 

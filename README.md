@@ -143,6 +143,4 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-This project is licensed under the LGPL-2.1 License - see the [LICENSE](LICENSE) file for details.
-
-This project was initially developed using [`libmpv2-rs`](https://github.com/kohsine/libmpv2-rs) (LGPL-2.1). To address licensing compatibility issues with Tauri's static builds, we attempted to create our own bindings for `libmpv-sys`. However, during this process,we found that our architectural approach naturally converged with that of the libmpv2-rs source code, which we had partially consulted during initial development. Although we didn't use the code directly, we believe the right thing to do is to honor the original author's foundational work. Therefore, in the spirit of open source, we have decided to license this project under the LGPL-2.1.
+This project is licensed under the MPL-2.0 License - see the [LICENSE](LICENSE) file for details.

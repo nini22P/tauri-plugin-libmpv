@@ -30,6 +30,8 @@ const useMpv = () => {
           'keep-open': 'yes',
           'force-window': 'yes',
           'pause': 'yes',
+          // "log-file": "mpv.log",
+          // "msg-level": "all=trace"
         },
         observedProperties: OBSERVED_PROPERTIES,
       }

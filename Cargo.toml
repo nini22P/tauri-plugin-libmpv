@@ -5,19 +5,12 @@ authors = ["22"]
 description = "A Tauri plugin for embedding the mpv player in your app via libmpv."
 edition = "2021"
 rust-version = "1.77.2"
-license = "LGPL-2.1"
+license = "MPL-2.0"
 repository = "https://github.com/nini22P/tauri-plugin-libmpv"
 keywords = ["tauri", "plugin", "mpv", "media", "player"]
-categories = ["multimedia", "gui", "api-bindings"]
+categories = ["multimedia", "gui"]
 readme = "README.md"
-exclude = [
-  "/examples",
-  "/dist-js",
-  "/guest-js",
-  "/node_modules",
-  "/target",
-  "/libmpv-sys",
-]
+exclude = ["/examples", "/dist-js", "/guest-js", "/node_modules", "/target"]
 links = "tauri-plugin-libmpv"
 
 [dependencies]
@@ -28,10 +21,10 @@ thiserror = "2"
 raw-window-handle = "0.6"
 log = "0.4"
 libc = "0.2"
-tauri-plugin-libmpv-sys = { version = "0.2.0", default-features = false }
 base64 = "0.22"
 scopeguard = "1"
 indexmap = { version = "2", features = ["serde"] }
+libloading = "0.9.0"
 
 [target.'cfg(windows)'.dependencies]
 
@@ -39,6 +32,3 @@ indexmap = { version = "2", features = ["serde"] }
 
 [build-dependencies]
 tauri-plugin = { version = "2", features = ["build"] }
-
-[features]
-generate-bindings = ["tauri-plugin-libmpv-sys/generate-bindings"]

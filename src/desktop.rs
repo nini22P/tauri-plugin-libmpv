@@ -1,24 +1,28 @@
-use log::{error, info, trace, warn};
+use log::{info, trace, warn};
 use raw_window_handle::HasWindowHandle;
+use scopeguard::defer;
 use serde::de::DeserializeOwned;
 use std::collections::HashMap;
+use std::ffi::{c_void, CStr, CString};
 use std::sync::Mutex;
-use tauri::Emitter;
 use tauri::{plugin::PluginApi, AppHandle, Manager, Runtime};
 
-use crate::libmpv::{MpvFormat, PropertyValue};
+use crate::bridge::{event_callback, MpvBridge};
+use crate::models::*;
 use crate::utils::get_wid;
 use crate::Result;
-use crate::{libmpv, models::*};
 
 pub fn init<R: Runtime, C: DeserializeOwned>(
     app: &AppHandle<R>,
     _api: PluginApi<R, C>,
 ) -> crate::Result<Mpv<R>> {
+    info!("Initializing libmpv-wrapper bridge...");
+    let bridge = MpvBridge::new()?;
     info!("Plugin registered.");
     let mpv = Mpv {
         app: app.clone(),
         instances: Mutex::new(HashMap::new()),
+        bridge: Mutex::new(bridge),
     };
     Ok(mpv)
 }
@@ -26,17 +30,18 @@ pub fn init<R: Runtime, C: DeserializeOwned>(
 pub struct Mpv<R: Runtime> {
     app: AppHandle<R>,
     pub instances: Mutex<HashMap<String, MpvInstance>>,
+    pub bridge: Mutex<MpvBridge>,
 }
 
 impl<R: Runtime> Mpv<R> {
     pub fn init(&self, mpv_config: MpvConfig, window_label: &str) -> Result<String> {
         self.init_wid_mode(mpv_config, window_label)?;
-
         Ok(window_label.to_string())
     }
 
     fn init_wid_mode(&self, mpv_config: MpvConfig, window_label: &str) -> Result<String> {
         let app = self.app.clone();
+        let bridge = self.bridge.lock().unwrap();
 
         let mut initial_options = mpv_config.initial_options.clone();
 
@@ -47,9 +52,7 @@ impl<R: Runtime> Mpv<R> {
                 .ok_or_else(|| crate::Error::WindowNotFound(window_label.to_string()))?;
             let window_handle = window.window_handle()?;
             let raw_window_handle = window_handle.as_raw();
-
             let wid = get_wid(raw_window_handle)?;
-
             initial_options.insert("wid".to_string(), serde_json::json!(wid));
         }
 
@@ -57,23 +60,36 @@ impl<R: Runtime> Mpv<R> {
             return Ok(window_label.to_string());
         };
 
-        let window_label_clone = window_label.to_string();
+        let initial_options_string = serde_json::to_string(&initial_options)?;
+        let observed_properties_string = serde_json::to_string(&mpv_config.observed_properties)?;
 
-        let mpv = libmpv::MpvBuilder::new()?
-            .set_options(initial_options)?
-            .observed_properties(mpv_config.observed_properties)?
-            .on_event(move |event| {
-                let event_name = format!("mpv-event-{}", window_label_clone);
-                if let Err(e) = app.emit_to(&window_label_clone, &event_name, &event) {
-                    error!("Failed to emit mpv event to frontend: {}", e);
-                }
-                Ok(())
-            })
-            .build()?;
+        let c_initial_options = CString::new(initial_options_string)?;
+        let c_observed_properties = CString::new(observed_properties_string)?;
+
+        let event_callback_data = Box::new((app.clone(), window_label.to_string()));
+        let event_userdata = Box::into_raw(event_callback_data) as *mut c_void;
+
+        let mpv_handle = unsafe {
+            (bridge.mpv_create)(
+                c_initial_options.as_ptr(),
+                c_observed_properties.as_ptr(),
+                event_callback::<R>,
+                event_userdata,
+            )
+        };
+
+        if mpv_handle.is_null() {
+            let _ = unsafe { Box::from_raw(event_userdata as *mut (AppHandle<R>, String)) };
+            return Err(crate::Error::CreateInstance);
+        }
 
         info!("mpv instance initialized for window '{}'.", window_label);
 
-        let instance = MpvInstance { mpv };
+        let instance = MpvInstance {
+            handle: MpvHandleWrapper(mpv_handle),
+            event_userdata: MpvHandleWrapper(event_userdata),
+        };
+
         instances_lock.insert(window_label.to_string(), instance);
 
         info!("Wid mode initialized for window '{}'.", window_label);
@@ -82,11 +98,19 @@ impl<R: Runtime> Mpv<R> {
     }
 
     pub fn destroy(&self, window_label: &str) -> Result<()> {
-        let instance_to_kill = self.remove_instance(window_label)?;
+        if let Some(instance) = self.remove_instance(window_label)? {
+            let bridge = self.bridge.lock().unwrap();
 
-        if instance_to_kill.is_some() {
+            unsafe {
+                (bridge.mpv_destroy)(instance.handle.inner());
+            }
+
+            let _ = unsafe {
+                Box::from_raw(instance.event_userdata.inner() as *mut (AppHandle<R>, String))
+            };
+
             info!(
-                "mpv instance for window '{}' has been removed and will be destroyed.",
+                "mpv instance for window '{}' has been destroyed.",
                 window_label,
             );
         } else {
@@ -95,7 +119,6 @@ impl<R: Runtime> Mpv<R> {
                 window_label
             );
         }
-
         Ok(())
     }
 
@@ -112,27 +135,36 @@ impl<R: Runtime> Mpv<R> {
         }
 
         self.with_instance(window_label, |instance| {
-            let string_args: Vec<String> = args
-                .iter()
-                .map(|v| match v {
-                    serde_json::Value::Bool(b) => {
-                        if *b {
-                            "yes".to_string()
-                        } else {
-                            "no".to_string()
-                        }
-                    }
-                    serde_json::Value::Number(n) => n.to_string(),
-                    serde_json::Value::String(s) => s.clone(),
-                    _ => v.to_string().trim_matches('"').to_string(),
+            let bridge = self.bridge.lock().unwrap();
+
+            let args_string = serde_json::to_string(&args)?;
+
+            let c_name = CString::new(name)?;
+            let c_args = CString::new(args_string)?;
+
+            let result_ptr = unsafe {
+                (bridge.mpv_command)(instance.handle.inner(), c_name.as_ptr(), c_args.as_ptr())
+            };
+
+            if result_ptr.is_null() {
+                return Err(crate::Error::FFI("Call returned null pointer".into()));
+            }
+
+            defer! {
+                unsafe { (bridge.mpv_free_string)(result_ptr) };
+            }
+
+            let response_str = unsafe { CStr::from_ptr(result_ptr).to_string_lossy() };
+            let response: FfiResponse = serde_json::from_str(&response_str)?;
+
+            if let Some(err) = response.error {
+                Err(crate::Error::Command {
+                    window_label: window_label.to_string(),
+                    message: err,
                 })
-                .collect();
-
-            let args_as_slices: Vec<&str> = string_args.iter().map(|s| s.as_str()).collect();
-
-            instance.mpv.command(name, &args_as_slices)?;
-
-            Ok(())
+            } else {
+                Ok(())
+            }
         })
     }
 
@@ -145,73 +177,92 @@ impl<R: Runtime> Mpv<R> {
         trace!("SET PROPERTY '{}' '{:?}'", name, value);
 
         self.with_instance(window_label, |instance| {
-            let property_value = match value {
-                serde_json::Value::Bool(b) => libmpv::PropertyValue::Flag(*b),
-                serde_json::Value::Number(n) => {
-                    if let Some(i) = n.as_i64() {
-                        libmpv::PropertyValue::Int64(i)
-                    } else if let Some(f) = n.as_f64() {
-                        libmpv::PropertyValue::Double(f)
-                    } else {
-                        return Err(crate::Error::InvalidPropertyValue {
-                            name: name.to_string(),
-                            message: format!("Unsupported number format: {}", n),
-                        });
-                    }
-                }
-                serde_json::Value::String(s) => libmpv::PropertyValue::String(s.clone()),
-                serde_json::Value::Null => {
-                    return Err(crate::Error::InvalidPropertyValue {
-                        name: name.to_string(),
-                        message: "Cannot set property to null".to_string(),
-                    });
-                }
-                _ => {
-                    return Err(crate::Error::InvalidPropertyValue {
-                        name: name.to_string(),
-                        message: format!("Unsupported value type: {:?}", value),
-                    });
-                }
+            let bridge = self.bridge.lock().unwrap();
+
+            let value_string = serde_json::to_string(value)?;
+
+            let c_name = CString::new(name)?;
+            let c_value = CString::new(value_string)?;
+
+            let result_ptr = unsafe {
+                (bridge.mpv_set_property)(
+                    instance.handle.inner(),
+                    c_name.as_ptr(),
+                    c_value.as_ptr(),
+                )
             };
 
-            instance.mpv.set_property(name, property_value)?;
+            if result_ptr.is_null() {
+                return Err(crate::Error::FFI("Call returned null pointer".into()));
+            }
 
-            Ok(())
+            defer! {
+                unsafe { (bridge.mpv_free_string)(result_ptr) };
+            }
+
+            let response_str = unsafe { CStr::from_ptr(result_ptr).to_string_lossy() };
+            let response: FfiResponse = serde_json::from_str(&response_str)?;
+
+            if let Some(err) = response.error {
+                Err(crate::Error::SetProperty {
+                    window_label: window_label.to_string(),
+                    message: err,
+                })
+            } else {
+                Ok(())
+            }
         })
     }
 
     pub fn get_property(
         &self,
         name: String,
-        format: MpvFormat,
+        format: String,
         window_label: &str,
-    ) -> crate::Result<PropertyValue> {
+    ) -> crate::Result<serde_json::Value> {
         self.with_instance(window_label, |instance| {
-            let value = match format {
-                MpvFormat::String => instance
-                    .mpv
-                    .get_property_string(&name)
-                    .map(PropertyValue::String),
-                MpvFormat::Flag => instance
-                    .mpv
-                    .get_property_flag(&name)
-                    .map(PropertyValue::Flag),
-                MpvFormat::Int64 => instance
-                    .mpv
-                    .get_property_int64(&name)
-                    .map(PropertyValue::Int64),
-                MpvFormat::Double => instance
-                    .mpv
-                    .get_property_double(&name)
-                    .map(PropertyValue::Double),
-                MpvFormat::Node => instance
-                    .mpv
-                    .get_property_node(&name)
-                    .map(PropertyValue::Node),
-            }?;
+            let bridge = self.bridge.lock().unwrap();
+
+            let c_name = CString::new(name.clone())?;
+            let c_format = CString::new(format.as_str())?;
+
+            let result_ptr = unsafe {
+                (bridge.mpv_get_property)(
+                    instance.handle.inner(),
+                    c_name.as_ptr(),
+                    c_format.as_ptr(),
+                )
+            };
+
+            defer! {
+                unsafe { (bridge.mpv_free_string)(result_ptr) };
+            }
+
+            let response_str = unsafe {
+                if result_ptr.is_null() {
+                    return Err(crate::Error::GetProperty {
+                        window_label: window_label.to_string(),
+                        message: "FFI call returned null pointer".into(),
+                    });
+                }
+                CStr::from_ptr(result_ptr).to_string_lossy()
+            };
+
+            let response: FfiResponse = serde_json::from_str(&response_str)?;
+
+            if let Some(err) = response.error {
+                return Err(crate::Error::GetProperty {
+                    window_label: window_label.to_string(),
+                    message: err,
+                });
+            }
+
+            let value = response.data.ok_or_else(|| crate::Error::GetProperty {
+                window_label: window_label.to_string(),
+                message: "FFI response contained no data".to_string(),
+            })?;
 
             trace!("GET PROPERTY '{}' '{:?}'", name, value);
-
             Ok(value)
         })
     }
@@ -223,23 +274,19 @@ impl<R: Runtime> Mpv<R> {
     ) -> Result<()> {
         trace!("SET VIDEO MARGIN RATIO '{:?}'", ratio);
 
-        self.with_instance(window_label, |instance| {
-            let margins = [
-                ("video-margin-ratio-left", ratio.left),
-                ("video-margin-ratio-right", ratio.right),
-                ("video-margin-ratio-top", ratio.top),
-                ("video-margin-ratio-bottom", ratio.bottom),
-            ];
+        let margins = [
+            ("video-margin-ratio-left", ratio.left),
+            ("video-margin-ratio-right", ratio.right),
+            ("video-margin-ratio-top", ratio.top),
+            ("video-margin-ratio-bottom", ratio.bottom),
+        ];
 
-            for (property, value_option) in margins {
-                if let Some(value) = value_option {
-                    let prop_value = libmpv::PropertyValue::Double(value);
-                    instance.mpv.set_property(property, prop_value)?;
-                }
+        for (property, value_option) in margins {
+            if let Some(value) = value_option {
+                self.set_property(property, &serde_json::json!(value), window_label)?;
             }
-
-            Ok(())
-        })
+        }
+        Ok(())
     }
 
     fn lock_and_check_existence<'a>(

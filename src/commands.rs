@@ -1,7 +1,5 @@
 use tauri::{command, AppHandle, Runtime};
 
-use crate::libmpv::MpvFormat;
-use crate::libmpv::PropertyValue;
 use crate::MpvConfig;
 use crate::MpvExt;
 use crate::Result;
@@ -64,9 +62,9 @@ pub(crate) async fn set_property<R: Runtime>(
 pub(crate) async fn get_property<R: Runtime>(
     app: AppHandle<R>,
     name: String,
-    format: MpvFormat,
+    format: String,
     window_label: String,
-) -> Result<PropertyValue> {
+) -> Result<serde_json::Value> {
     match tauri::async_runtime::spawn_blocking(move || {
         app.mpv().get_property(name, format, &window_label)
     })

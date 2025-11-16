@@ -4,12 +4,13 @@ use scopeguard::defer;
 use serde::de::DeserializeOwned;
 use std::collections::HashMap;
 use std::ffi::{c_void, CStr, CString};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use tauri::{plugin::PluginApi, AppHandle, Manager, Runtime};
 
 use crate::models::*;
 use crate::utils::get_wid;
 use crate::wrapper::{event_callback, Wrapper};
+use crate::Error;
 use crate::Result;
 
 pub fn init<R: Runtime, C: DeserializeOwned>(
@@ -20,7 +21,7 @@ pub fn init<R: Runtime, C: DeserializeOwned>(
     let mpv = Mpv {
         app: app.clone(),
         instances: Mutex::new(HashMap::new()),
-        wrapper: Mutex::new(None),
+        wrapper: OnceLock::new(),
     };
     Ok(mpv)
 }
@@ -28,7 +29,7 @@ pub fn init<R: Runtime, C: DeserializeOwned>(
 pub struct Mpv<R: Runtime> {
     app: AppHandle<R>,
     pub instances: Mutex<HashMap<String, MpvInstance>>,
-    pub wrapper: Mutex<Option<Wrapper>>,
+    pub wrapper: OnceLock<Result<Wrapper>>,
 }
 
 impl<R: Runtime> Mpv<R> {
@@ -40,8 +41,7 @@ impl<R: Runtime> Mpv<R> {
     fn init_wid_mode(&self, mpv_config: MpvConfig, window_label: &str) -> Result<String> {
         let app = self.app.clone();
 
-        let wrapper_lock = self.get_wrapper()?;
-        let wrapper = wrapper_lock.as_ref().unwrap();
+        let wrapper = self.get_wrapper()?;
 
         let mut initial_options = mpv_config.initial_options.clone();
 
@@ -99,8 +99,7 @@ impl<R: Runtime> Mpv<R> {
 
     pub fn destroy(&self, window_label: &str) -> Result<()> {
         if let Some(instance) = self.remove_instance(window_label)? {
-            let wrapper_lock = self.get_wrapper()?;
-            let wrapper = wrapper_lock.as_ref().unwrap();
+            let wrapper = self.get_wrapper()?;
 
             unsafe {
                 (wrapper.mpv_destroy)(instance.handle.inner());
@@ -136,8 +135,7 @@ impl<R: Runtime> Mpv<R> {
         }
 
         self.with_instance(window_label, |instance| {
-            let wrapper_lock = self.get_wrapper()?;
-            let wrapper = wrapper_lock.as_ref().unwrap();
+            let wrapper = self.get_wrapper()?;
 
             let args_string = serde_json::to_string(&args)?;
 
@@ -179,8 +177,7 @@ impl<R: Runtime> Mpv<R> {
         trace!("SET PROPERTY '{}' '{:?}'", name, value);
 
         self.with_instance(window_label, |instance| {
-            let wrapper_lock = self.get_wrapper()?;
-            let wrapper = wrapper_lock.as_ref().unwrap();
+            let wrapper = self.get_wrapper()?;
 
             let value_string = serde_json::to_string(value)?;
 
@@ -224,8 +221,7 @@ impl<R: Runtime> Mpv<R> {
         window_label: &str,
     ) -> crate::Result<serde_json::Value> {
         self.with_instance(window_label, |instance| {
-            let wrapper_lock = self.get_wrapper()?;
-            let wrapper = wrapper_lock.as_ref().unwrap();
+            let wrapper = self.get_wrapper()?;
 
             let c_name = CString::new(name.clone())?;
             let c_format = CString::new(format.as_str())?;
@@ -346,13 +342,18 @@ impl<R: Runtime> Mpv<R> {
         Ok(instances_lock.remove(window_label))
     }
 
-    fn get_wrapper(&self) -> Result<std::sync::MutexGuard<'_, Option<Wrapper>>> {
-        let mut wrapper_lock = self.wrapper.lock().unwrap();
-        if wrapper_lock.is_none() {
+    fn get_wrapper(&self) -> Result<&Wrapper> {
+        let result = self.wrapper.get_or_init(|| {
             info!("libmpv-wrapper not initialized. Trying to load libmpv-wrapper now...");
-            *wrapper_lock = Some(Wrapper::new()?);
-            info!("libmpv-wrapper loaded successfully.");
+            Wrapper::new()
+        });
+
+        match result {
+            Ok(wrapper) => Ok(wrapper),
+            Err(e) => Err(Error::FFI(format!(
+                "Failed to get wrapper (it may have failed to load on first attempt): {}",
+                e
+            ))),
         }
-        Ok(wrapper_lock)
     }
 }

@@ -1,8 +1,6 @@
 use libloading::{Library, Symbol};
-use log::{error, info};
-use std::env;
+use log::error;
 use std::ffi::{c_char, c_void, CStr};
-use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Runtime};
 
 use crate::{Error, Result};
@@ -58,7 +56,7 @@ pub unsafe extern "C" fn event_callback<R: Runtime>(event: *const c_char, userda
     });
 }
 
-pub struct MpvBridge {
+pub struct Wrapper {
     _lib: &'static Library,
     pub mpv_create: Symbol<'static, FnCreate>,
     pub mpv_destroy: Symbol<'static, FnDestroy>,
@@ -68,17 +66,20 @@ pub struct MpvBridge {
     pub mpv_free_string: Symbol<'static, FnFreeString>,
 }
 
-impl MpvBridge {
+impl Wrapper {
     pub fn new() -> Result<Self> {
-        let lib_path = find_library_path()?;
-        info!("Loading libmpv-wrapper from: {:?}", lib_path);
+        #[cfg(target_os = "windows")]
+        let lib_name = "libmpv_wrapper.dll";
+        #[cfg(target_os = "macos")]
+        let lib_name = "libmpv_wrapper.dylib";
+        #[cfg(target_os = "linux")]
+        let lib_name = "libmpv_wrapper.so";
 
         unsafe {
-            let lib = Library::new(&lib_path).map_err(|e| {
-                Error::Io(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    format!("Failed to load library at {:?}: {}", lib_path, e),
-                ))
+            let lib = Library::new(lib_name).map_err(|e| {
+                let error = format!("Failed to load {:?} : {}", lib_name, e);
+                error!("{}", error);
+                Error::Io(std::io::Error::new(std::io::ErrorKind::NotFound, error))
             })?;
 
             let lib: &'static Library = Box::leak(Box::new(lib));
@@ -101,26 +102,4 @@ impl MpvBridge {
             })
         }
     }
-}
-
-fn find_library_path() -> Result<PathBuf> {
-    let mut lib_path = env::current_exe()?;
-    lib_path.pop();
-
-    #[cfg(target_os = "windows")]
-    let lib_name = "libmpv_wrapper.dll";
-    #[cfg(target_os = "macos")]
-    let lib_name = "libmpv_wrapper.dylib";
-    #[cfg(target_os = "linux")]
-    let lib_name = "libmpv_wrapper.so";
-
-    lib_path.push(lib_name);
-    if lib_path.exists() {
-        return Ok(lib_path);
-    }
-
-    Err(Error::Io(std::io::Error::new(
-        std::io::ErrorKind::NotFound,
-        format!("Could not find library {} in {:?}", lib_name, lib_path),
-    )))
 }

@@ -6,11 +6,11 @@ use tauri::{
 pub use models::*;
 
 #[cfg(desktop)]
-mod bridge;
-#[cfg(desktop)]
 mod desktop;
 #[cfg(mobile)]
 mod mobile;
+#[cfg(desktop)]
+mod wrapper;
 
 mod commands;
 mod error;

@@ -7,22 +7,20 @@ use std::ffi::{c_void, CStr, CString};
 use std::sync::Mutex;
 use tauri::{plugin::PluginApi, AppHandle, Manager, Runtime};
 
-use crate::bridge::{event_callback, MpvBridge};
 use crate::models::*;
 use crate::utils::get_wid;
+use crate::wrapper::{event_callback, Wrapper};
 use crate::Result;
 
 pub fn init<R: Runtime, C: DeserializeOwned>(
     app: &AppHandle<R>,
     _api: PluginApi<R, C>,
 ) -> crate::Result<Mpv<R>> {
-    info!("Initializing libmpv-wrapper bridge...");
-    let bridge = MpvBridge::new()?;
     info!("Plugin registered.");
     let mpv = Mpv {
         app: app.clone(),
         instances: Mutex::new(HashMap::new()),
-        bridge: Mutex::new(bridge),
+        wrapper: Mutex::new(None),
     };
     Ok(mpv)
 }
@@ -30,7 +28,7 @@ pub fn init<R: Runtime, C: DeserializeOwned>(
 pub struct Mpv<R: Runtime> {
     app: AppHandle<R>,
     pub instances: Mutex<HashMap<String, MpvInstance>>,
-    pub bridge: Mutex<MpvBridge>,
+    pub wrapper: Mutex<Option<Wrapper>>,
 }
 
 impl<R: Runtime> Mpv<R> {
@@ -41,7 +39,9 @@ impl<R: Runtime> Mpv<R> {
 
     fn init_wid_mode(&self, mpv_config: MpvConfig, window_label: &str) -> Result<String> {
         let app = self.app.clone();
-        let bridge = self.bridge.lock().unwrap();
+
+        let wrapper_lock = self.get_wrapper()?;
+        let wrapper = wrapper_lock.as_ref().unwrap();
 
         let mut initial_options = mpv_config.initial_options.clone();
 
@@ -70,7 +70,7 @@ impl<R: Runtime> Mpv<R> {
         let event_userdata = Box::into_raw(event_callback_data) as *mut c_void;
 
         let mpv_handle = unsafe {
-            (bridge.mpv_create)(
+            (wrapper.mpv_create)(
                 c_initial_options.as_ptr(),
                 c_observed_properties.as_ptr(),
                 event_callback::<R>,
@@ -99,10 +99,11 @@ impl<R: Runtime> Mpv<R> {
 
     pub fn destroy(&self, window_label: &str) -> Result<()> {
         if let Some(instance) = self.remove_instance(window_label)? {
-            let bridge = self.bridge.lock().unwrap();
+            let wrapper_lock = self.get_wrapper()?;
+            let wrapper = wrapper_lock.as_ref().unwrap();
 
             unsafe {
-                (bridge.mpv_destroy)(instance.handle.inner());
+                (wrapper.mpv_destroy)(instance.handle.inner());
             }
 
             let _ = unsafe {
@@ -135,7 +136,8 @@ impl<R: Runtime> Mpv<R> {
         }
 
         self.with_instance(window_label, |instance| {
-            let bridge = self.bridge.lock().unwrap();
+            let wrapper_lock = self.get_wrapper()?;
+            let wrapper = wrapper_lock.as_ref().unwrap();
 
             let args_string = serde_json::to_string(&args)?;
 
@@ -143,7 +145,7 @@ impl<R: Runtime> Mpv<R> {
             let c_args = CString::new(args_string)?;
 
             let result_ptr = unsafe {
-                (bridge.mpv_command)(instance.handle.inner(), c_name.as_ptr(), c_args.as_ptr())
+                (wrapper.mpv_command)(instance.handle.inner(), c_name.as_ptr(), c_args.as_ptr())
             };
 
             if result_ptr.is_null() {
@@ -151,7 +153,7 @@ impl<R: Runtime> Mpv<R> {
             }
 
             defer! {
-                unsafe { (bridge.mpv_free_string)(result_ptr) };
+                unsafe { (wrapper.mpv_free_string)(result_ptr) };
             }
 
             let response_str = unsafe { CStr::from_ptr(result_ptr).to_string_lossy() };
@@ -177,7 +179,8 @@ impl<R: Runtime> Mpv<R> {
         trace!("SET PROPERTY '{}' '{:?}'", name, value);
 
         self.with_instance(window_label, |instance| {
-            let bridge = self.bridge.lock().unwrap();
+            let wrapper_lock = self.get_wrapper()?;
+            let wrapper = wrapper_lock.as_ref().unwrap();
 
             let value_string = serde_json::to_string(value)?;
 
@@ -185,7 +188,7 @@ impl<R: Runtime> Mpv<R> {
             let c_value = CString::new(value_string)?;
 
             let result_ptr = unsafe {
-                (bridge.mpv_set_property)(
+                (wrapper.mpv_set_property)(
                     instance.handle.inner(),
                     c_name.as_ptr(),
                     c_value.as_ptr(),
@@ -197,7 +200,7 @@ impl<R: Runtime> Mpv<R> {
             }
 
             defer! {
-                unsafe { (bridge.mpv_free_string)(result_ptr) };
+                unsafe { (wrapper.mpv_free_string)(result_ptr) };
             }
 
             let response_str = unsafe { CStr::from_ptr(result_ptr).to_string_lossy() };
@@ -221,13 +224,14 @@ impl<R: Runtime> Mpv<R> {
         window_label: &str,
     ) -> crate::Result<serde_json::Value> {
         self.with_instance(window_label, |instance| {
-            let bridge = self.bridge.lock().unwrap();
+            let wrapper_lock = self.get_wrapper()?;
+            let wrapper = wrapper_lock.as_ref().unwrap();
 
             let c_name = CString::new(name.clone())?;
             let c_format = CString::new(format.as_str())?;
 
             let result_ptr = unsafe {
-                (bridge.mpv_get_property)(
+                (wrapper.mpv_get_property)(
                     instance.handle.inner(),
                     c_name.as_ptr(),
                     c_format.as_ptr(),
@@ -235,7 +239,7 @@ impl<R: Runtime> Mpv<R> {
             };
 
             defer! {
-                unsafe { (bridge.mpv_free_string)(result_ptr) };
+                unsafe { (wrapper.mpv_free_string)(result_ptr) };
             }
 
             let response_str = unsafe {
@@ -340,5 +344,15 @@ impl<R: Runtime> Mpv<R> {
             }
         };
         Ok(instances_lock.remove(window_label))
+    }
+
+    fn get_wrapper(&self) -> Result<std::sync::MutexGuard<'_, Option<Wrapper>>> {
+        let mut wrapper_lock = self.wrapper.lock().unwrap();
+        if wrapper_lock.is_none() {
+            info!("libmpv-wrapper not initialized. Trying to load libmpv-wrapper now...");
+            *wrapper_lock = Some(Wrapper::new()?);
+            info!("libmpv-wrapper loaded successfully.");
+        }
+        Ok(wrapper_lock)
     }
 }

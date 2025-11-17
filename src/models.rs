@@ -2,22 +2,16 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::ffi::c_void;
 
+use crate::wrapper::MpvHandle;
+
 #[derive(Debug, Clone, Copy)]
-pub struct MpvHandleWrapper(pub *mut c_void);
-
-impl MpvHandleWrapper {
-    pub fn inner(&self) -> *mut c_void {
-        self.0
-    }
-}
-
-unsafe impl Send for MpvHandleWrapper {}
-unsafe impl Sync for MpvHandleWrapper {}
-
 pub struct MpvInstance {
-    pub handle: MpvHandleWrapper,
-    pub event_userdata: MpvHandleWrapper,
+    pub handle: *mut MpvHandle,
+    pub event_userdata: *mut c_void,
 }
+
+unsafe impl Send for MpvInstance {}
+unsafe impl Sync for MpvInstance {}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

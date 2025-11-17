@@ -1,17 +1,18 @@
-use log::{info, trace, warn};
+use log::{error, info, trace, warn};
 use raw_window_handle::HasWindowHandle;
 use scopeguard::defer;
 use serde::de::DeserializeOwned;
 use std::collections::HashMap;
-use std::ffi::{c_void, CStr, CString};
+use std::ffi::{CStr, CString, c_char, c_void};
 use std::sync::{Mutex, OnceLock};
-use tauri::{plugin::PluginApi, AppHandle, Manager, Runtime};
+use tauri::Emitter;
+use tauri::{AppHandle, Manager, Runtime, plugin::PluginApi};
 
-use crate::models::*;
-use crate::utils::get_wid;
-use crate::wrapper::{event_callback, Wrapper};
 use crate::Error;
 use crate::Result;
+use crate::models::*;
+use crate::utils::get_wid;
+use crate::wrapper::LibmpvWrapper;
 
 pub fn init<R: Runtime, C: DeserializeOwned>(
     app: &AppHandle<R>,
@@ -26,10 +27,33 @@ pub fn init<R: Runtime, C: DeserializeOwned>(
     Ok(mpv)
 }
 
+pub unsafe extern "C" fn event_callback<R: Runtime>(event: *const c_char, userdata: *mut c_void) {
+    if event.is_null() || userdata.is_null() {
+        return;
+    }
+
+    let event_string = unsafe { CStr::from_ptr(event).to_string_lossy().to_string() };
+    let (app, window_label) = unsafe { (*(userdata as *const (AppHandle<R>, String))).clone() };
+
+    tauri::async_runtime::spawn(async move {
+        match serde_json::from_str::<serde_json::Value>(&event_string) {
+            Ok(event) => {
+                let event_name = format!("mpv-event-{}", window_label);
+                if let Err(e) = app.emit_to(&window_label, &event_name, &event) {
+                    error!("Failed to emit mpv event to frontend: {}", e);
+                }
+            }
+            Err(e) => {
+                error!("Failed to deserialize mpv FFI event: {}", e);
+            }
+        }
+    });
+}
+
 pub struct Mpv<R: Runtime> {
     app: AppHandle<R>,
     pub instances: Mutex<HashMap<String, MpvInstance>>,
-    pub wrapper: OnceLock<Result<Wrapper>>,
+    pub wrapper: OnceLock<Result<LibmpvWrapper>>,
 }
 
 impl<R: Runtime> Mpv<R> {
@@ -70,10 +94,10 @@ impl<R: Runtime> Mpv<R> {
         let event_userdata = Box::into_raw(event_callback_data) as *mut c_void;
 
         let mpv_handle = unsafe {
-            (wrapper.mpv_create)(
+            wrapper.mpv_wrapper_create(
                 c_initial_options.as_ptr(),
                 c_observed_properties.as_ptr(),
-                event_callback::<R>,
+                Some(event_callback::<R>),
                 event_userdata,
             )
         };
@@ -86,8 +110,8 @@ impl<R: Runtime> Mpv<R> {
         info!("mpv instance initialized for window '{}'.", window_label);
 
         let instance = MpvInstance {
-            handle: MpvHandleWrapper(mpv_handle),
-            event_userdata: MpvHandleWrapper(event_userdata),
+            handle: mpv_handle,
+            event_userdata: event_userdata,
         };
 
         instances_lock.insert(window_label.to_string(), instance);
@@ -102,12 +126,11 @@ impl<R: Runtime> Mpv<R> {
             let wrapper = self.get_wrapper()?;
 
             unsafe {
-                (wrapper.mpv_destroy)(instance.handle.inner());
+                wrapper.mpv_wrapper_destroy(instance.handle);
             }
 
-            let _ = unsafe {
-                Box::from_raw(instance.event_userdata.inner() as *mut (AppHandle<R>, String))
-            };
+            let _ =
+                unsafe { Box::from_raw(instance.event_userdata as *mut (AppHandle<R>, String)) };
 
             info!(
                 "mpv instance for window '{}' has been destroyed.",
@@ -143,7 +166,7 @@ impl<R: Runtime> Mpv<R> {
             let c_args = CString::new(args_string)?;
 
             let result_ptr = unsafe {
-                (wrapper.mpv_command)(instance.handle.inner(), c_name.as_ptr(), c_args.as_ptr())
+                wrapper.mpv_wrapper_command(instance.handle, c_name.as_ptr(), c_args.as_ptr())
             };
 
             if result_ptr.is_null() {
@@ -151,7 +174,7 @@ impl<R: Runtime> Mpv<R> {
             }
 
             defer! {
-                unsafe { (wrapper.mpv_free_string)(result_ptr) };
+                unsafe { wrapper.mpv_wrapper_free_string(result_ptr) };
             }
 
             let response_str = unsafe { CStr::from_ptr(result_ptr).to_string_lossy() };
@@ -185,11 +208,7 @@ impl<R: Runtime> Mpv<R> {
             let c_value = CString::new(value_string)?;
 
             let result_ptr = unsafe {
-                (wrapper.mpv_set_property)(
-                    instance.handle.inner(),
-                    c_name.as_ptr(),
-                    c_value.as_ptr(),
-                )
+                wrapper.mpv_wrapper_set_property(instance.handle, c_name.as_ptr(), c_value.as_ptr())
             };
 
             if result_ptr.is_null() {
@@ -197,7 +216,7 @@ impl<R: Runtime> Mpv<R> {
             }
 
             defer! {
-                unsafe { (wrapper.mpv_free_string)(result_ptr) };
+                unsafe { wrapper.mpv_wrapper_free_string(result_ptr) };
             }
 
             let response_str = unsafe { CStr::from_ptr(result_ptr).to_string_lossy() };
@@ -227,15 +246,15 @@ impl<R: Runtime> Mpv<R> {
             let c_format = CString::new(format.as_str())?;
 
             let result_ptr = unsafe {
-                (wrapper.mpv_get_property)(
-                    instance.handle.inner(),
+                wrapper.mpv_wrapper_get_property(
+                    instance.handle,
                     c_name.as_ptr(),
                     c_format.as_ptr(),
                 )
             };
 
             defer! {
-                unsafe { (wrapper.mpv_free_string)(result_ptr) };
+                unsafe { wrapper.mpv_wrapper_free_string(result_ptr) };
             }
 
             let response_str = unsafe {
@@ -342,10 +361,17 @@ impl<R: Runtime> Mpv<R> {
         Ok(instances_lock.remove(window_label))
     }
 
-    fn get_wrapper(&self) -> Result<&Wrapper> {
+    fn get_wrapper(&self) -> Result<&LibmpvWrapper> {
         let result = self.wrapper.get_or_init(|| {
             info!("libmpv-wrapper not initialized. Trying to load libmpv-wrapper now...");
-            Wrapper::new()
+            #[cfg(target_os = "windows")]
+            let lib_name = "libmpv_wrapper.dll";
+            #[cfg(target_os = "macos")]
+            let lib_name = "libmpv_wrapper.dylib";
+            #[cfg(target_os = "linux")]
+            let lib_name = "libmpv_wrapper.so";
+
+            unsafe { LibmpvWrapper::new(lib_name) }.map_err(Into::into)
         });
 
         match result {

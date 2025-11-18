@@ -70,20 +70,45 @@ impl<R: Runtime> Mpv<R> {
 
         let mut initial_options = mpv_config.initial_options.clone();
 
-        if !initial_options.contains_key("wid") {
-            let window = self
-                .app
-                .get_webview_window(window_label)
-                .ok_or_else(|| crate::Error::WindowNotFound(window_label.to_string()))?;
-            let window_handle = window.window_handle()?;
-            let raw_window_handle = window_handle.as_raw();
-            let wid = get_wid(raw_window_handle)?;
-            initial_options.insert("wid".to_string(), serde_json::json!(wid));
-        }
-
         let Some(mut instances_lock) = self.lock_and_check_existence(window_label)? else {
             return Ok(window_label.to_string());
         };
+
+        let audio_only = initial_options.iter().any(|(key, value)| {
+            (key == "video" && (value == "no" || value == false))
+                || (key == "vid" && (value == "no" || value == false))
+        });
+
+        if audio_only {
+            info!(
+                "Audio-only mode detected for window '{}'. Skipping window embedding.",
+                window_label
+            );
+        }
+
+        if !audio_only && !initial_options.contains_key("wid") {
+            let wid_result = (|| -> crate::Result<i64> {
+                let window = self
+                    .app
+                    .get_webview_window(window_label)
+                    .ok_or_else(|| crate::Error::WindowNotFound(window_label.to_string()))?;
+                let window_handle = window.window_handle()?;
+                let raw_window_handle = window_handle.as_raw();
+                get_wid(raw_window_handle)
+            })();
+
+            match wid_result {
+                Ok(wid) => {
+                    initial_options.insert("wid".to_string(), serde_json::json!(wid));
+                }
+                Err(e) => {
+                    error!(
+                        "Failed to get wid for window '{}': {}. Skipping window embedding.",
+                        window_label, e
+                    );
+                }
+            }
+        }
 
         let initial_options_string = serde_json::to_string(&initial_options)?;
         let observed_properties_string = serde_json::to_string(&mpv_config.observed_properties)?;

@@ -4,6 +4,7 @@ use scopeguard::defer;
 use serde::de::DeserializeOwned;
 use std::collections::HashMap;
 use std::ffi::{CStr, CString, c_char, c_void};
+use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use tauri::Emitter;
 use tauri::{AppHandle, Manager, Runtime, plugin::PluginApi};
@@ -364,14 +365,48 @@ impl<R: Runtime> Mpv<R> {
     fn get_wrapper(&self) -> Result<&LibmpvWrapper> {
         let result = self.wrapper.get_or_init(|| {
             info!("libmpv-wrapper not initialized. Trying to load libmpv-wrapper now...");
-            #[cfg(target_os = "windows")]
-            let lib_name = "libmpv_wrapper.dll";
-            #[cfg(target_os = "macos")]
-            let lib_name = "libmpv_wrapper.dylib";
-            #[cfg(target_os = "linux")]
-            let lib_name = "libmpv_wrapper.so";
 
-            unsafe { LibmpvWrapper::new(lib_name) }.map_err(Into::into)
+            #[cfg(target_os = "windows")]
+            let lib_name = "libmpv-wrapper.dll";
+            #[cfg(target_os = "macos")]
+            let lib_name = "libmpv-wrapper.dylib";
+            #[cfg(target_os = "linux")]
+            let lib_name = "libmpv-wrapper.so";
+
+            let mut search_paths: Vec<PathBuf> = Vec::new();
+
+            if let Ok(exe_path) = std::env::current_exe() {
+                if let Some(exe_dir) = exe_path.parent() {
+                    search_paths.push(exe_dir.to_path_buf());
+                }
+            }
+
+            search_paths.push(PathBuf::new());
+
+            for path in &search_paths {
+                let full_lib_path: String = if path.as_os_str().is_empty() {
+                    lib_name.to_string()
+                } else {
+                    path.join(lib_name).to_string_lossy().into_owned()
+                };
+
+                let load_result = unsafe { LibmpvWrapper::new(&full_lib_path) };
+
+                if load_result.is_ok() {
+                    info!("Successfully loaded libmpv-wrapper from: {}", full_lib_path);
+                    return load_result.map_err(Into::into);
+                }
+            }
+
+            Err(Error::FFI(format!(
+                "Failed to load libmpv-wrapper. Tried the following paths: {}",
+                search_paths
+                    .iter()
+                    .map(|p| p.join(lib_name).to_string_lossy().into_owned())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )))
+            .map_err(Into::into)
         });
 
         match result {

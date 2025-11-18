@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.0
+
+- Replace the custom `libmpv-sys` bindings with the `libmpv-wrapper` dynamic library.
+- Skip window embedding in audio-only mode (e.g., when using `'video': 'no'` or `'vid' : 'no'` in `initialOptions`).
+- Re-license to MPL-2.0.
+
 ## v0.2.2
 
 - Simplify property getter implementations using macros.

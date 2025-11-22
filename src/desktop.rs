@@ -33,8 +33,17 @@ pub unsafe extern "C" fn event_callback<R: Runtime>(event: *const c_char, userda
         return;
     }
 
+    let EventUserData {
+        app,
+        free_fn,
+        window_label,
+    } = unsafe { &*(userdata as *const EventUserData<R>) };
+
     let event_string = unsafe { CStr::from_ptr(event).to_string_lossy().to_string() };
-    let (app, window_label) = unsafe { (*(userdata as *const (AppHandle<R>, String))).clone() };
+
+    unsafe {
+        free_fn(event as *mut c_char);
+    }
 
     tauri::async_runtime::spawn(async move {
         match serde_json::from_str::<serde_json::Value>(&event_string) {
@@ -67,6 +76,8 @@ impl<R: Runtime> Mpv<R> {
         let app = self.app.clone();
 
         let wrapper = self.get_wrapper()?;
+
+        let free_fn = wrapper.mpv_wrapper_free;
 
         let mut initial_options = mpv_config.initial_options.clone();
 
@@ -116,7 +127,11 @@ impl<R: Runtime> Mpv<R> {
         let c_initial_options = CString::new(initial_options_string)?;
         let c_observed_properties = CString::new(observed_properties_string)?;
 
-        let event_callback_data = Box::new((app.clone(), window_label.to_string()));
+        let event_callback_data = Box::new(EventUserData {
+            app,
+            free_fn,
+            window_label: window_label.to_string(),
+        });
         let event_userdata = Box::into_raw(event_callback_data) as *mut c_void;
 
         let mpv_handle = unsafe {
@@ -155,8 +170,7 @@ impl<R: Runtime> Mpv<R> {
                 wrapper.mpv_wrapper_destroy(instance.handle);
             }
 
-            let _ =
-                unsafe { Box::from_raw(instance.event_userdata as *mut (AppHandle<R>, String)) };
+            let _ = unsafe { Box::from_raw(instance.event_userdata as *mut EventUserData<R>) };
 
             info!(
                 "mpv instance for window '{}' has been destroyed.",
@@ -200,7 +214,7 @@ impl<R: Runtime> Mpv<R> {
             }
 
             defer! {
-                unsafe { wrapper.mpv_wrapper_free_string(result_ptr) };
+                unsafe { wrapper.mpv_wrapper_free(result_ptr) };
             }
 
             let response_str = unsafe { CStr::from_ptr(result_ptr).to_string_lossy() };
@@ -242,7 +256,7 @@ impl<R: Runtime> Mpv<R> {
             }
 
             defer! {
-                unsafe { wrapper.mpv_wrapper_free_string(result_ptr) };
+                unsafe { wrapper.mpv_wrapper_free(result_ptr) };
             }
 
             let response_str = unsafe { CStr::from_ptr(result_ptr).to_string_lossy() };
@@ -280,7 +294,7 @@ impl<R: Runtime> Mpv<R> {
             };
 
             defer! {
-                unsafe { wrapper.mpv_wrapper_free_string(result_ptr) };
+                unsafe { wrapper.mpv_wrapper_free(result_ptr) };
             }
 
             let response_str = unsafe {

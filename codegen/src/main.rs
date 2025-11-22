@@ -26,17 +26,16 @@ fn main() {
 
     println!("Generating bindings...");
     let bindings = bindgen::Builder::default()
-        .raw_line("/* Run 'cargo run -p codegen' to regenerate */")
-        .raw_line("\n")
-        .raw_line("#![allow(unsafe_op_in_unsafe_fn)]")
         .header(header_path.to_str().unwrap())
         .dynamic_library_name("LibmpvWrapper")
         .dynamic_link_require_all(true)
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
-        .formatter(bindgen::Formatter::Prettyplease)
         .allowlist_function("mpv_wrapper_.*")
         .allowlist_type("Mpv")
         .allowlist_type("EventCallback")
+        .impl_debug(true)
+        .wrap_unsafe_ops(true)
+        .formatter(bindgen::Formatter::Prettyplease)
+        .raw_line("/* Run 'cargo run -p codegen' to regenerate */")
         .generate()
         .expect("Unable to generate bindings");
 

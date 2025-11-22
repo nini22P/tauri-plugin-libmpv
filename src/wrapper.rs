@@ -2,9 +2,6 @@
 
 /* Run 'cargo run -p codegen' to regenerate */
 
-
-#![allow(unsafe_op_in_unsafe_fn)]
-
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct MpvHandle {
@@ -44,36 +41,36 @@ pub struct LibmpvWrapper {
         name: *const ::std::os::raw::c_char,
         format: *const ::std::os::raw::c_char,
     ) -> *mut ::std::os::raw::c_char,
-    pub mpv_wrapper_free_string: unsafe extern "C" fn(s: *mut ::std::os::raw::c_char),
+    pub mpv_wrapper_free: unsafe extern "C" fn(s: *mut ::std::os::raw::c_char),
 }
 impl LibmpvWrapper {
     pub unsafe fn new<P>(path: P) -> Result<Self, ::libloading::Error>
     where
         P: AsRef<::std::ffi::OsStr>,
     {
-        let library = ::libloading::Library::new(path)?;
-        Self::from_library(library)
+        let library = unsafe { ::libloading::Library::new(path) }?;
+        unsafe { Self::from_library(library) }
     }
     pub unsafe fn from_library<L>(library: L) -> Result<Self, ::libloading::Error>
     where
         L: Into<::libloading::Library>,
     {
         let __library = library.into();
-        let mpv_wrapper_create = __library.get(b"mpv_wrapper_create\0").map(|sym| *sym)?;
-        let mpv_wrapper_destroy = __library
-            .get(b"mpv_wrapper_destroy\0")
+        let mpv_wrapper_create = unsafe { __library.get(b"mpv_wrapper_create\0") }
             .map(|sym| *sym)?;
-        let mpv_wrapper_command = __library
-            .get(b"mpv_wrapper_command\0")
+        let mpv_wrapper_destroy = unsafe { __library.get(b"mpv_wrapper_destroy\0") }
             .map(|sym| *sym)?;
-        let mpv_wrapper_set_property = __library
-            .get(b"mpv_wrapper_set_property\0")
+        let mpv_wrapper_command = unsafe { __library.get(b"mpv_wrapper_command\0") }
             .map(|sym| *sym)?;
-        let mpv_wrapper_get_property = __library
-            .get(b"mpv_wrapper_get_property\0")
+        let mpv_wrapper_set_property = unsafe {
+            __library.get(b"mpv_wrapper_set_property\0")
+        }
             .map(|sym| *sym)?;
-        let mpv_wrapper_free_string = __library
-            .get(b"mpv_wrapper_free_string\0")
+        let mpv_wrapper_get_property = unsafe {
+            __library.get(b"mpv_wrapper_get_property\0")
+        }
+            .map(|sym| *sym)?;
+        let mpv_wrapper_free = unsafe { __library.get(b"mpv_wrapper_free\0") }
             .map(|sym| *sym)?;
         Ok(LibmpvWrapper {
             __library,
@@ -82,7 +79,7 @@ impl LibmpvWrapper {
             mpv_wrapper_command,
             mpv_wrapper_set_property,
             mpv_wrapper_get_property,
-            mpv_wrapper_free_string,
+            mpv_wrapper_free,
         })
     }
     /** Creates a new mpv handle.
@@ -100,19 +97,21 @@ impl LibmpvWrapper {
         event_callback: EventCallback,
         event_userdata: *mut ::std::os::raw::c_void,
     ) -> *mut MpvHandle {
-        (self
-            .mpv_wrapper_create)(
-            initial_options,
-            observed_properties,
-            event_callback,
-            event_userdata,
-        )
+        unsafe {
+            (self
+                .mpv_wrapper_create)(
+                initial_options,
+                observed_properties,
+                event_callback,
+                event_userdata,
+            )
+        }
     }
     /** Destroys the mpv handle and terminates the mpv core.
 
  @param handle A valid pointer to the mpv handle (obtained from `mpv_wrapper_create`).*/
     pub unsafe fn mpv_wrapper_destroy(&self, handle: *mut MpvHandle) {
-        (self.mpv_wrapper_destroy)(handle)
+        unsafe { (self.mpv_wrapper_destroy)(handle) }
     }
     /** Executes an mpv command.
 
@@ -128,7 +127,7 @@ impl LibmpvWrapper {
         name: *const ::std::os::raw::c_char,
         args: *const ::std::os::raw::c_char,
     ) -> *mut ::std::os::raw::c_char {
-        (self.mpv_wrapper_command)(handle, name, args)
+        unsafe { (self.mpv_wrapper_command)(handle, name, args) }
     }
     /** Sets an mpv property.
 
@@ -143,7 +142,7 @@ impl LibmpvWrapper {
         name: *const ::std::os::raw::c_char,
         value: *const ::std::os::raw::c_char,
     ) -> *mut ::std::os::raw::c_char {
-        (self.mpv_wrapper_set_property)(handle, name, value)
+        unsafe { (self.mpv_wrapper_set_property)(handle, name, value) }
     }
     /** Gets an mpv property.
 
@@ -158,12 +157,12 @@ impl LibmpvWrapper {
         name: *const ::std::os::raw::c_char,
         format: *const ::std::os::raw::c_char,
     ) -> *mut ::std::os::raw::c_char {
-        (self.mpv_wrapper_get_property)(handle, name, format)
+        unsafe { (self.mpv_wrapper_get_property)(handle, name, format) }
     }
     /** Frees a C string that was returned by one of the `mpv_wrapper_*` functions.
 
  @param s A pointer to the C string to be freed.*/
-    pub unsafe fn mpv_wrapper_free_string(&self, s: *mut ::std::os::raw::c_char) {
-        (self.mpv_wrapper_free_string)(s)
+    pub unsafe fn mpv_wrapper_free(&self, s: *mut ::std::os::raw::c_char) {
+        unsafe { (self.mpv_wrapper_free)(s) }
     }
 }

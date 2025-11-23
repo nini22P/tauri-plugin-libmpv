@@ -15,6 +15,3 @@ node_modules/
 
 dist-js
 dist
-
-libmpv-2.dll
-libmpv-wrapper.dll

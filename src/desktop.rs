@@ -3,17 +3,17 @@ use raw_window_handle::HasWindowHandle;
 use scopeguard::defer;
 use serde::de::DeserializeOwned;
 use std::collections::HashMap;
-use std::ffi::{CStr, CString, c_char, c_void};
+use std::ffi::{c_char, c_void, CStr, CString};
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use tauri::Emitter;
-use tauri::{AppHandle, Manager, Runtime, plugin::PluginApi};
+use tauri::{plugin::PluginApi, AppHandle, Manager, Runtime};
 
-use crate::Error;
-use crate::Result;
 use crate::models::*;
 use crate::utils::get_wid;
 use crate::wrapper::LibmpvWrapper;
+use crate::Error;
+use crate::Result;
 
 pub fn init<R: Runtime, C: DeserializeOwned>(
     app: &AppHandle<R>,
@@ -417,6 +417,10 @@ impl<R: Runtime> Mpv<R> {
             if let Ok(exe_path) = std::env::current_exe() {
                 if let Some(exe_dir) = exe_path.parent() {
                     search_paths.push(exe_dir.to_path_buf());
+                    let lib_dir = exe_dir.join("lib");
+                    if lib_dir.exists() {
+                        search_paths.push(lib_dir);
+                    }
                 }
             }
 
@@ -450,10 +454,14 @@ impl<R: Runtime> Mpv<R> {
 
         match result {
             Ok(wrapper) => Ok(wrapper),
-            Err(e) => Err(Error::FFI(format!(
-                "Failed to get wrapper (it may have failed to load on first attempt): {}",
-                e
-            ))),
+            Err(e) => {
+                let error = format!(
+                    "Failed to get wrapper (it may have failed to load on first attempt): {}",
+                    e
+                );
+                error!("{}", error);
+                Err(Error::FFI(error))
+            }
         }
     }
 }

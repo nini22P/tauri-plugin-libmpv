@@ -3,8 +3,8 @@ name = "tauri-plugin-libmpv"
 version = "0.3.0"
 authors = ["22"]
 description = "A Tauri plugin for embedding the mpv player in your app via libmpv."
-edition = "2024"
-rust-version = "1.85.0"
+edition = "2021"
+rust-version = "1.77.2"
 license = "MPL-2.0"
 repository = "https://github.com/nini22P/tauri-plugin-libmpv"
 keywords = ["tauri", "plugin", "mpv", "media", "player"]
@@ -21,24 +21,24 @@ exclude = [
 links = "tauri-plugin-libmpv"
 
 [dependencies]
-tauri = { version = "2", features = [] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1.0"
-thiserror = "2"
-raw-window-handle = "0.6"
-log = "0.4"
-libc = "0.2"
-base64 = "0.22"
-scopeguard = "1"
-indexmap = { version = "2", features = ["serde"] }
-libloading = "0.8"
+tauri = { version = "2.9.3", features = [] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+thiserror = "2.0.17"
+raw-window-handle = "0.6.2"
+log = "0.4.28"
+libc = "0.2.177"
+base64 = "0.22.1"
+scopeguard = "1.2.0"
+indexmap = { version = "2.12.1", features = ["serde"] }
+libloading = "0.8.9"
 
 [target.'cfg(windows)'.dependencies]
 
 [target.'cfg(unix)'.dependencies]
 
 [build-dependencies]
-tauri-plugin = { version = "2", features = ["build"] }
+tauri-plugin = { version = "2.5.1", features = ["build"] }
 
 [workspace]
 members = ["codegen"]

@@ -25,57 +25,8 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Create lib directory
-        run: New-Item -ItemType Directory -Force -Path "./examples/react/src-tauri/lib"
-
-      - name: Download libmpv-wrapper
-        shell: pwsh
-        run: |
-          curl -L -o sha256.txt "https://github.com/nini22P/libmpv-wrapper/releases/latest/download/sha256.txt"
-
-          $line = Get-Content sha256.txt | Where-Object { $_ -like "*libmpv-wrapper-windows-x86_64*" } | Select-Object -First 1
-          
-          if ($null -eq $line) {
-            Write-Error "Could not find 'libmpv-wrapper' in sha256.txt."
-            exit 1
-          }
-          
-          $parts = $line -split '\s+'
-          $file_name = $parts[-1].Trim()
-          
-          $download_url = "https://github.com/nini22P/libmpv-wrapper/releases/latest/download/$file_name"
-
-          Write-Host "Found asset: $file_name"
-
-          curl -L -o "$file_name" "$download_url"
-          7z x "$file_name" -o"libmpv-wrapper"
-          
-          $dll_path = Get-ChildItem -Path "./libmpv-wrapper" -Filter "libmpv-wrapper.dll" -Recurse | Select-Object -First 1
-          Copy-Item -Path $dll_path.FullName -Destination "./examples/react/src-tauri/lib/libmpv-wrapper.dll"
-
-      - name: Download libmpv
-        shell: pwsh
-        run: |
-          curl -L -o sha256.txt "https://github.com/zhongfly/mpv-winbuild/releases/latest/download/sha256.txt"
-          
-          $line = Get-Content sha256.txt | Where-Object { $_ -like "*mpv-dev-lgpl-x86_64*" -and $_ -notlike "*v3*" } | Select-Object -First 1
-          
-          if ($null -eq $line) {
-            Write-Error "Could not find 'mpv-dev-lgpl-x86_64' in sha256.txt."
-            exit 1
-          }
-
-          $parts = $line -split '\s+'
-          $file_name = $parts[-1].Trim()
-          
-          $download_url = "https://github.com/zhongfly/mpv-winbuild/releases/latest/download/$file_name"
-          
-          Write-Host "Found asset: $file_name"
-          
-          curl -L -o "$file_name" "$download_url"
-          7z x "$file_name" -o"mpv-build-dev"
-
-          Copy-Item -Path "./mpv-build-dev/libmpv-2.dll" -Destination "./examples/react/src-tauri/lib/libmpv-2.dll"
+      - name: Download lib
+        run: cd examples/react && ./setup-lib.ps1
 
       - name: Build example
         shell: pwsh

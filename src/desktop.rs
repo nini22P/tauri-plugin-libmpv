@@ -1,11 +1,12 @@
 use log::{error, info, trace, warn};
+use once_cell::sync::OnceCell;
 use raw_window_handle::HasWindowHandle;
 use scopeguard::defer;
 use serde::de::DeserializeOwned;
 use std::collections::HashMap;
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 use tauri::Emitter;
 use tauri::{plugin::PluginApi, AppHandle, Manager, Runtime};
 
@@ -23,9 +24,15 @@ pub fn init<R: Runtime, C: DeserializeOwned>(
     let mpv = Mpv {
         app: app.clone(),
         instances: Mutex::new(HashMap::new()),
-        wrapper: OnceLock::new(),
+        wrapper: OnceCell::new(),
     };
     Ok(mpv)
+}
+
+pub struct Mpv<R: Runtime> {
+    app: AppHandle<R>,
+    pub instances: Mutex<HashMap<String, MpvInstance>>,
+    pub wrapper: OnceCell<LibmpvWrapper>,
 }
 
 pub unsafe extern "C" fn event_callback<R: Runtime>(event: *const c_char, userdata: *mut c_void) {
@@ -58,12 +65,6 @@ pub unsafe extern "C" fn event_callback<R: Runtime>(event: *const c_char, userda
             }
         }
     });
-}
-
-pub struct Mpv<R: Runtime> {
-    app: AppHandle<R>,
-    pub instances: Mutex<HashMap<String, MpvInstance>>,
-    pub wrapper: OnceLock<Result<LibmpvWrapper>>,
 }
 
 impl<R: Runtime> Mpv<R> {
@@ -402,7 +403,7 @@ impl<R: Runtime> Mpv<R> {
     }
 
     fn get_wrapper(&self) -> Result<&LibmpvWrapper> {
-        let result = self.wrapper.get_or_init(|| {
+        self.wrapper.get_or_try_init(|| {
             info!("libmpv-wrapper not initialized. Trying to load libmpv-wrapper now...");
 
             #[cfg(target_os = "windows")]
@@ -412,56 +413,35 @@ impl<R: Runtime> Mpv<R> {
             #[cfg(target_os = "linux")]
             let lib_name = "libmpv-wrapper.so";
 
-            let mut search_paths: Vec<PathBuf> = Vec::new();
-
+            let mut search_dirs: Vec<PathBuf> = Vec::new();
             if let Ok(exe_path) = std::env::current_exe() {
                 if let Some(exe_dir) = exe_path.parent() {
-                    search_paths.push(exe_dir.to_path_buf());
-                    let lib_dir = exe_dir.join("lib");
-                    if lib_dir.exists() {
-                        search_paths.push(lib_dir);
-                    }
+                    search_dirs.push(exe_dir.to_path_buf());
+                    search_dirs.push(exe_dir.join("lib"));
                 }
             }
 
-            search_paths.push(PathBuf::new());
+            let valid_lib_path: String = search_dirs
+                .iter()
+                .map(|dir| dir.join(lib_name))
+                .find(|path| path.exists())
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_else(|| lib_name.to_string());
 
-            for path in &search_paths {
-                let full_lib_path: String = if path.as_os_str().is_empty() {
-                    lib_name.to_string()
-                } else {
-                    path.join(lib_name).to_string_lossy().into_owned()
-                };
+            info!("Attempting to load libmpv-wrapper from: {}", valid_lib_path);
+            let result = unsafe { LibmpvWrapper::new(&valid_lib_path) };
 
-                let load_result = unsafe { LibmpvWrapper::new(&full_lib_path) };
-
-                if load_result.is_ok() {
-                    info!("Successfully loaded libmpv-wrapper from: {}", full_lib_path);
-                    return load_result.map_err(Into::into);
+            match result {
+                Ok(wrapper) => {
+                    info!("Successfully loaded libmpv-wrapper.");
+                    Ok(wrapper)
                 }
+                Err(e) => Err(Error::FFI(format!(
+                    "Failed to load libmpv-wrapper from '{}'. Error: {:?}",
+                    valid_lib_path, e
+                ))
+                .into()),
             }
-
-            Err(Error::FFI(format!(
-                "Failed to load libmpv-wrapper. Tried the following paths: {}",
-                search_paths
-                    .iter()
-                    .map(|p| p.join(lib_name).to_string_lossy().into_owned())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )))
-            .map_err(Into::into)
-        });
-
-        match result {
-            Ok(wrapper) => Ok(wrapper),
-            Err(e) => {
-                let error = format!(
-                    "Failed to get wrapper (it may have failed to load on first attempt): {}",
-                    e
-                );
-                error!("{}", error);
-                Err(Error::FFI(error))
-            }
-        }
+        })
     }
 }

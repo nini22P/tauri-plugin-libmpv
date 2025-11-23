@@ -1,6 +1,6 @@
 use tauri::{
-    Manager, RunEvent, Runtime, WindowEvent,
     plugin::{Builder, TauriPlugin},
+    Manager, RunEvent, Runtime, WindowEvent,
 };
 
 pub use models::*;

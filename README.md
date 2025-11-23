@@ -23,6 +23,8 @@ Before installing the plugin, you need to gather the necessary dynamic libraries
     * Create a folder named `lib` inside your `src-tauri` directory.
     * Copy both `libmpv-wrapper.dll` and `libmpv-2.dll` into `src-tauri/lib/`.
 
+Or you can use the [setup script](./examples/react/setup-lib.ps1).
+
 ### Linux Setup (Debian/Ubuntu)
 
 1. **Install System libmpv:**

@@ -1,6 +1,6 @@
 {
   "name": "tauri-plugin-libmpv-api",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "author": "22",
   "description": "A Tauri plugin for embedding the mpv player in your app via libmpv.",
   "license": "MPL-2.0",
@@ -26,6 +26,9 @@
   "engines": {
     "node": ">=18.0.0"
   },
+  "bin": {
+    "tauri-plugin-libmpv-api": "./dist-js/cli.cjs"
+  },
   "types": "./dist-js/index.d.ts",
   "main": "./dist-js/index.cjs",
   "module": "./dist-js/index.js",
@@ -50,15 +53,17 @@
     "@tauri-apps/api": "2.8.0"
   },
   "devDependencies": {
-    "@rollup/plugin-typescript": "12.1.4",
-    "rollup": "^4.50.1",
-    "tslib": "^2.6.2",
-    "typescript": "^5.3.3",
+    "7z-wasm": "^1.2.0",
     "@eslint/js": "^9.36.0",
+    "@rollup/plugin-typescript": "12.1.4",
+    "@types/node": "^24.10.1",
     "eslint": "^9.36.0",
     "eslint-plugin-react": "^7.37.5",
     "globals": "^16.4.0",
     "jiti": "^2.6.0",
+    "rollup": "^4.50.1",
+    "tslib": "^2.6.2",
+    "typescript": "^5.3.3",
     "typescript-eslint": "^8.44.1"
   }
 }

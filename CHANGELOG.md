@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.3.1
+
+- Add automatic setup script for dynamic libraries.
+
 ## v0.3.0
 
 - Replace the custom `libmpv-sys` bindings with the `libmpv-wrapper` dynamic library.

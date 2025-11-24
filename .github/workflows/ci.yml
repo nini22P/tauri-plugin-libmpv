@@ -25,9 +25,6 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Download lib
-        run: cd examples/react && ./setup-lib.ps1
-
       - name: Build example
         shell: pwsh
         run: |
@@ -36,6 +33,7 @@ jobs:
           pnpm build
           cd examples/react
           pnpm install
+          pnpm setup-lib
           pnpm tauri build
 
       - name: Upload artifact

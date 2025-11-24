@@ -2,45 +2,6 @@
 
 A Tauri plugin for embedding the mpv player in your app via libmpv.
 
-## Prerequisites
-
-Before installing the plugin, you need to gather the necessary dynamic libraries. This plugin requires **two** parts to work:
-
-1. **The Wrapper Library**: `libmpv-wrapper` (Interface between plugin and libmpv).
-2. **The Actual mpv Library**: `libmpv` (The video player core).
-
-### Windows Setup
-
-1. **Download the Wrapper:**
-    * Go to [libmpv-wrapper Releases](https://github.com/nini22P/libmpv-wrapper/releases).
-    * Download `libmpv-wrapper-windows-x86_64.zip`
-    * Extract `libmpv-wrapper.dll`.
-2. **Download libmpv:**
-    * Go to [zhongfly's builds](https://github.com/zhongfly/mpv-winbuild/releases).
-    * Download the latest `mpv-dev-....7z`.
-    * Extract `libmpv-2.dll`.
-3. **Project Setup:**
-    * Create a folder named `lib` inside your `src-tauri` directory.
-    * Copy both `libmpv-wrapper.dll` and `libmpv-2.dll` into `src-tauri/lib/`.
-
-Or you can use the [setup script](./examples/react/setup-lib.ps1).
-
-### Linux Setup (Debian/Ubuntu)
-
-1. **Install System libmpv:**
-
-    ```bash
-    sudo apt install libmpv-dev mpv
-    ```
-
-2. **Download the Wrapper:**
-    * Go to [libmpv-wrapper Releases](https://github.com/nini22P/libmpv-wrapper/releases).
-    * Download `libmpv-wrapper-linux-x86_64.zip`
-    * Extract `libmpv-wrapper.so`.
-3. **Project Setup:**
-    * Create a folder named `lib` inside your `src-tauri` directory.
-    * Copy `libmpv-wrapper.so` into `src-tauri/lib/`.
-
 ## Installation
 
 ### Install the Plugin
@@ -48,6 +9,91 @@ Or you can use the [setup script](./examples/react/setup-lib.ps1).
 ```bash
 npm run tauri add libmpv
 ```
+
+### Setup Dynamic Libraries
+
+#### Recommended: Automatic Setup
+
+The setup script automatically downloads the [`libmpv-wrapper`](https://github.com/nini22P/libmpv-wrapper). On Windows, it also downloads [`libmpv`](https://mpv.io/) (via [`zhongfly's builds`](https://github.com/zhongfly/mpv-winbuild)).
+
+**For macOS and Linux**, please install the system `libmpv` manually:
+
+* **macOS**: `brew install mpv`
+* **Linux (Debian/Ubuntu)**: `sudo apt install libmpv-dev`
+
+Run the script:
+
+```shell
+  npx tauri-plugin-libmpv-api setup-lib
+```
+
+---
+
+#### Manual Setup
+
+If you prefer to set things up manually, please follow the instructions below for your operating system.
+
+This plugin requires **two** parts to work:
+
+1. **The Wrapper Library**: `libmpv-wrapper` (Interface between plugin and libmpv).
+2. **The Actual mpv Library**: `libmpv` (The video player core).
+
+##### Windows Setup
+
+1. **Download the Wrapper:**
+   * Go to [libmpv-wrapper Releases](https://github.com/nini22P/libmpv-wrapper/releases).
+   * Download the zip matching your architecture:
+     * **Intel/AMD (Standard):** `libmpv-wrapper-windows-x86_64.zip`
+     * **ARM64:** `libmpv-wrapper-windows-aarch64.zip`
+   * Extract `libmpv-wrapper.dll`.
+
+2. **Download libmpv:**
+   * Go to [zhongfly's builds](https://github.com/zhongfly/mpv-winbuild/releases).
+   * Download the latest `mpv-dev-lgpl-...7z` for your architecture (`x86_64` or `aarch64`).
+   * **Note:** Do NOT download the `v3` version unless you are sure your CPU supports it.
+   * Extract `libmpv-2.dll`.
+
+3. **Project Setup:**
+   * Create a folder named `lib` inside your `src-tauri` directory.
+   * Copy both `libmpv-wrapper.dll` and `libmpv-2.dll` into `src-tauri/lib/`.
+
+##### Linux Setup (Debian/Ubuntu)
+
+1. **Install System libmpv:**
+
+    ```bash
+    sudo apt install libmpv-dev
+    ```
+
+2. **Download the Wrapper:**
+   * Go to [libmpv-wrapper Releases](https://github.com/nini22P/libmpv-wrapper/releases).
+   * Download the zip matching your architecture:
+     * **Intel/AMD (Standard):** `libmpv-wrapper-linux-x86_64.zip`
+     * **ARM64 (e.g. Raspberry Pi):** `libmpv-wrapper-linux-aarch64.zip`
+   * Extract `libmpv-wrapper.so`.
+
+3. **Project Setup:**
+   * Create a folder named `lib` inside your `src-tauri` directory.
+   * Copy `libmpv-wrapper.so` into `src-tauri/lib/`.
+
+##### macOS Setup
+
+1. **Install System libmpv:**
+
+    ```bash
+    brew install mpv
+    ```
+
+2. **Download the Wrapper:**
+   * Go to [libmpv-wrapper Releases](https://github.com/nini22P/libmpv-wrapper/releases).
+   * Download the zip for your architecture:
+     * **Apple Silicon (M1/M2/M3):** `libmpv-wrapper-macos-aarch64.zip`
+     * **Intel:** `libmpv-wrapper-macos-x86_64.zip`
+   * Extract `libmpv-wrapper.dylib`.
+
+3. **Project Setup:**
+   * Create a folder named `lib` inside your `src-tauri` directory.
+   * Copy `libmpv-wrapper.dylib` into `src-tauri/lib/`.
 
 ### Configure Resources (Important)
 
